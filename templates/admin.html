@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-4">
+        <div class="card p-4 mb-3 shadow">
+            <h4 class="text-info border-bottom pb-2 mb-3">Admin Panel</h4>
+            <p class="mb-1">Game ID: <strong class="text-warning h5">{{ game.id }}</strong></p>
+            <p>Status: <span id="status" class="badge bg-secondary text-uppercase">{{ game.state }}</span></p>
+            
+            <button id="startBtn" onclick="startGame()" class="btn btn-success btn-lg w-100 mb-3 shadow-sm">
+                🚀 START ROUND
+            </button>
+            
+            <div class="alert alert-dark border-secondary">
+                <small class="text-muted d-block mb-1">PLAYER JOIN LINK:</small>
+                <a href="{{ url_for('join_page', game_id=game.id, _external=True) }}" target="_blank" class="text-info text-decoration-none small">
+                    {{ url_for('join_page', game_id=game.id, _external=True) }}
+                </a>
+            </div>
+            
+            <a href="/qr/{{ game.id }}" target="_blank" class="btn btn-outline-light btn-sm w-100">Generate QR Code</a>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        <div class="card p-4 shadow">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="text-warning m-0">🏆 Top 8 Teams</h3>
+                <div class="spinner-grow spinner-grow-sm text-danger" role="status"></div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle">
+                    <thead>
+                        <tr class="text-muted small uppercase">
+                            <th>Rank</th>
+                            <th>Team Name</th>
+                            <th class="text-end">Total Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lbBody">
+                        <tr><td colspan="3" class="text-center text-muted py-4">Waiting for teams to join...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const GAME_ID = "{{ game.id }}";
+
+    async function startGame() {
+    if(!confirm("Start the round?")) return;
+    
+    try {
+        const res = await fetch('/api/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ game_id: GAME_ID })
+        });
+        
+        const data = await res.json();
+        if(data.status === "started") {
+            // This forces the UI to update immediately
+            location.reload(); 
+        } else {
+            alert("Error: " + data.error);
+        }
+    } catch (err) {
+        console.error("Fetch failed:", err);
+    }
+}
+    // Live Leaderboard Polling (Every 2 seconds)
+    setInterval(async () => {
+        try {
+            const res = await fetch(`/api/leaderboard/${GAME_ID}`);
+            const data = await res.json();
+            const tbody = document.getElementById("lbBody");
+            
+            if (data.length === 0) return;
+            
+            tbody.innerHTML = "";
+            data.forEach((team, index) => {
+                const isQualifying = index < 8;
+                const tr = `
+                    <tr class="${isQualifying ? 'table-active' : ''}">
+                        <td class="fw-bold text-muted">${index + 1}</td>
+                        <td class="fw-bold ${isQualifying ? 'text-white' : 'text-secondary'}">${team.name}</td>
+                        <td class="text-end text-success fw-bold">${team.score}</td>
+                    </tr>
+                `;
+                tbody.innerHTML += tr;
+            });
+        } catch (e) { console.error("LB Error:", e); }
+    }, 2000);
+</script>
+{% endblock %}

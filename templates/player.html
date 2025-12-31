@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        
+        <div class="card mb-3 p-3 shadow-sm border-0 bg-dark text-white">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="text-secondary mb-0 text-uppercase small">Team</h6>
+                    <h3 class="m-0 text-warning fw-bold">{{ team.name }}</h3>
+                    <small class="text-info">{{ player.name }}</small>
+                </div>
+                <div class="text-end">
+                    <h2 class="timer-display text-danger m-0" id="timer">--:--</h2>
+                    <div class="badge bg-secondary">Score: <span id="score">0</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card p-4 text-center shadow border-0" id="gameContainer" style="min-height: 400px; background-color: #1e293b;">
+            
+            <div id="lobbyMsg" class="py-5">
+                <div class="spinner-border text-primary mb-3" role="status"></div>
+                <h3 class="text-white">Connecting...</h3>
+            </div>
+
+            <div id="p1Interface" class="d-none">
+                <span class="badge bg-info mb-3 px-3">PHASE 1: DECODE</span>
+                <h2 class="text-light mb-4">Unscramble This:</h2>
+                
+                <div class="p-3 mb-4 bg-black rounded border border-secondary">
+                    <h1 class="display-3 fw-bold text-white m-0" id="scrambleText">LOADING...</h1>
+                </div>
+                
+                <div class="input-group mb-3">
+                    <input type="text" id="p1Input" class="form-control form-control-lg text-center bg-dark text-white border-secondary" placeholder="Type answer..." autocomplete="off">
+                    <button onclick="submitP1()" class="btn btn-primary px-4 fw-bold">SUBMIT</button>
+                </div>
+                <p class="text-muted">Attempts left: <span id="attemptsVal" class="text-danger fw-bold">5</span></p>
+            </div>
+
+            <div id="p2Interface" class="d-none">
+                <span class="badge bg-success mb-3 px-3">PHASE 2: CREATE</span>
+                
+                <div id="p2Waiting" class="">
+                    <h4 class="text-muted">Waiting for P1...</h4>
+                    <div class="progress mt-3" style="height: 5px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <div id="p2Active" class="d-none">
+                    <p class="text-muted mb-1">Include this word:</p>
+                    <h1 class="text-success fw-bold display-4 mb-4" id="targetWord">---</h1>
+                    
+                    <div class="alert alert-dark border-secondary mb-4">
+                        <span class="text-muted d-block small">REQUIRED LENGTH</span>
+                        <div class="display-4 fw-bold text-white" id="diceSum">0</div>
+                    </div>
+
+                    <textarea id="p2Input" class="form-control bg-dark text-white border-secondary mb-3" rows="2" placeholder="Write sentence..."></textarea>
+                    <button onclick="submitP2()" class="btn btn-success w-100 fw-bold">SUBMIT</button>
+                </div>
+            </div>
+        </div>
+        
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let gameState = "lobby";
+
+    // P1 Submit Logic
+    async function submitP1() {
+        const val = document.getElementById("p1Input").value;
+        if(!val) return;
+        
+        const input = document.getElementById("p1Input");
+        const oldVal = input.value;
+        input.value = ""; 
+        
+        const res = await fetch('/api/action', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action: 'guess', value: val })
+        });
+        const data = await res.json();
+        
+        if(data.status === "correct") {
+            Swal.fire({ icon: 'success', title: 'CORRECT!', toast: true, position: 'top', timer: 1000, showConfirmButton: false });
+        } else {
+            input.value = oldVal;
+            Swal.fire({ icon: 'error', title: 'WRONG', toast: true, position: 'top', timer: 1000, showConfirmButton: false });
+        }
+    }
+
+    // P2 Submit Logic
+    async function submitP2() {
+        const val = document.getElementById("p2Input").value;
+        if(!val) return;
+        const res = await fetch('/api/action', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action: 'submit_sentence', value: val })
+        });
+        const data = await res.json();
+        if(data.status === "correct") {
+            document.getElementById("p2Input").value = "";
+            Swal.fire({ icon: 'success', title: 'SENT!', toast: true, position: 'top', timer: 1000, showConfirmButton: false });
+        } else {
+            Swal.fire({ icon: 'warning', title: data.msg || 'Invalid' });
+        }
+    }
+
+    // SYNC LOOP
+    setInterval(async () => {
+        try {
+            // Added ?t=Date.now() to prevent Safari from caching the response
+            const res = await fetch('/api/sync?t=' + Date.now(), { method: 'POST' });
+            if(!res.ok) return;
+            const data = await res.json();
+
+            gameState = data.state;
+            document.getElementById("score").innerText = data.team_score || 0;
+            
+            const m = Math.floor((data.time_left || 0) / 60);
+            const s = (data.time_left || 0) % 60;
+            document.getElementById("timer").innerText = `${m}:${s.toString().padStart(2, '0')}`;
+
+            if(gameState === "running") {
+                document.getElementById("lobbyMsg").classList.add("d-none");
+
+                // Check for P1 Data
+                if(data.p1_data) {
+                    document.getElementById("p1Interface").classList.remove("d-none");
+                    document.getElementById("p2Interface").classList.add("d-none");
+                    
+                    // Simple Text Update
+                    const txt = data.p1_data.scrambled;
+                    document.getElementById("scrambleText").innerText = txt ? txt : "Waiting...";
+                    document.getElementById("attemptsVal").innerText = data.p1_data.attempts;
+                } 
+                // Check for P2 Data
+                else if(data.p2_data) {
+                    document.getElementById("p1Interface").classList.add("d-none");
+                    document.getElementById("p2Interface").classList.remove("d-none");
+                    
+                    if(data.p2_data.active) {
+                        document.getElementById("p2Waiting").classList.add("d-none");
+                        document.getElementById("p2Active").classList.remove("d-none");
+                        document.getElementById("targetWord").innerText = data.p2_data.target_word;
+                        document.getElementById("diceSum").innerText = data.p2_data.dice_sum;
+                    } else {
+                        document.getElementById("p2Waiting").classList.remove("d-none");
+                        document.getElementById("p2Active").classList.add("d-none");
+                    }
+                }
+            } 
+            else if (gameState === "finished") {
+                document.getElementById("gameContainer").innerHTML = `<h1 class="text-white mt-5">GAME OVER</h1>`;
+            }
+        } catch(e) { console.error(e); }
+    }, 1000);
+</script>
+{% endblock %}
