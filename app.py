@@ -12,7 +12,13 @@ app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
 
 # ... (Configuration & Helpers same as before) ...
-WORD_BANK = ["algorithm", "bandwidth", "cipher", "database", "python", "flask", "docker", "cloud", "binary", "cache"] * 10
+WORD_BANK = ["Apple", "Bread", "Candy", "Dream", "Eagle", "Flame", "Grape", "Heart", 
+    "Island", "Juice", "Knife", "Lemon", "Music", "Night", "Ocean", "Paper", 
+    "Queen", "River", "Stone", "Table", "Uncle", "Voice", "Water", "Young", 
+    "Zebra", "Beach", "Cloud", "Dance", "Earth", "Fruit", "Green", "House", 
+    "Light", "Money", "Onion", "Piano", "Radio", "Shirt", "Tiger", "Train", 
+    "Watch", "World", "Chair", "Dress", "Glass", "Mouse", "Phone", "Spoon", 
+    "Truck", "Plant"]
 GAMES = {}
 
 def make_id(n=6):
