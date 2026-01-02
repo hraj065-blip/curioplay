@@ -23,7 +23,11 @@ WORD_BANK = [
     "Zebra", "Beach", "Cloud", "Dance", "Earth", "Fruit", "Green", "House", 
     "Light", "Money", "Onion", "Piano", "Radio", "Shirt", "Tiger", "Train", 
     "Watch", "World", "Chair", "Dress", "Glass", "Mouse", "Phone", "Spoon", 
-    "Truck", "Plant"
+    "Truck", "Plant","tree", "moon", "star", "book", "lake", "wind", "sand", "rock", "road", "snow",
+    "apple", "river", "table", "cloud", "stone", "light", "bread", "green", "smile", "grass",
+    "desert", "forest", "summer", "winter", "spring", "travel", "silver", "sunset", "bright", "gentle",
+    "morning", "evening", "harmony", "freedom", "balance", "picture", "lantern", "journey", "crystal", "meadow",
+    "melody", "ocean", "horizon", "captain", "village", "canyon", "planet", "harbor", "beacon", "memory"
 ]
 
 GAMES = {}
