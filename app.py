@@ -4,9 +4,11 @@ import time
 import random
 import re
 import os
+import io
+import qrcode
 from flask import (
     Flask, render_template, request, redirect,
-    url_for, session, jsonify, abort
+    url_for, session, jsonify, abort, send_file
 )
 
 app = Flask(__name__)
@@ -23,8 +25,11 @@ WORD_BANK = [
     "Zebra", "Beach", "Cloud", "Dance", "Earth", "Fruit", "Green", "House", 
     "Light", "Money", "Onion", "Piano", "Radio", "Shirt", "Tiger", "Train", 
     "Watch", "World", "Chair", "Dress", "Glass", "Mouse", "Phone", "Spoon", 
-    "Truck", "Plant"
-]
+    "Truck", "Plant", "river", "table", "cloud", "stone", "light", "bread", "green", "smile", "grass",
+    "desert", "forest", "summer", "winter", "spring", "travel", "silver", "sunset", "bright", "gentle",
+    "morning", "evening", "harmony", "freedom", "balance", "picture", "lantern", "journey", "crystal", "meadow",
+    "melody", "ocean", "horizon", "captain", "village", "canyon", "planet", "harbor", "beacon", "memory"
+]*3
 
 GAMES = {}
 
@@ -35,7 +40,6 @@ def make_id(n=6):
     return "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(n))
 
 def scramble(word):
-    # Ensure we scramble the lowercase version to avoid confusion
     word = word.lower()
     if len(word) <= 3: return word
     arr = list(word)
@@ -63,7 +67,7 @@ def create_game():
         "start_time": None,
         "end_time": None,
         "duration_sec": duration * 60,
-        "words": random.sample(WORD_BANK * 5, 100), # Sample from the new list
+        "words": random.sample(WORD_BANK * 5, 100),
         "teams": {}
     }
     session["game_id"] = game_id
@@ -94,11 +98,8 @@ def join_page(game_id):
                 "p1_solved_history": [], 
                 "p1_attempts": 5, 
                 "p2_dice_sum": None, 
-                
-                # Scramble Lock Variables
                 "current_scramble": None,
                 "current_scramble_idx": -1,
-                
                 "players": {}
             }
         
@@ -124,6 +125,22 @@ def player_page():
     if not team: return redirect(url_for("index"))
     
     return render_template("player.html", game=game, team=team, player=team["players"].get(session.get("token")), token=session.get("token"))
+
+# ===============================
+# QR CODE ROUTE (NEW)
+# ===============================
+@app.route("/qrcode/<game_id>")
+def get_qrcode(game_id):
+    # Generates a QR code for the join link of this specific game
+    # _external=True ensures it uses the full https:// domain (e.g. Render URL)
+    join_url = url_for('join_page', game_id=game_id, _external=True)
+    
+    img = qrcode.make(join_url)
+    buf = io.BytesIO()
+    img.save(buf)
+    buf.seek(0)
+    
+    return send_file(buf, mimetype='image/png')
 
 # ===============================
 # API LOGIC
@@ -160,6 +177,10 @@ def api_sync():
 
     time_left = max(0, int(game["end_time"] - time.time())) if game["state"] == "running" else 0
     
+    # Auto-End Logic
+    if game["state"] == "running" and time_left <= 0:
+        game["state"] = "finished"
+
     response = {
         "state": game["state"],
         "time_left": time_left,
@@ -169,16 +190,12 @@ def api_sync():
     if token in team["players"]:
         role = team["players"][token]["role"].lower()
         
-        # --- P1 LOGIC ---
         if role == "p1":
             current_idx = team["p1_idx"]
-            
-            # Self-healing keys
             if "current_scramble_idx" not in team:
                 team["current_scramble_idx"] = -1
                 team["current_scramble"] = None
             
-            # Update scramble only if word index changed
             if team["current_scramble_idx"] != current_idx:
                 raw_word = game["words"][current_idx]
                 team["current_scramble"] = scramble(raw_word)
@@ -188,16 +205,10 @@ def api_sync():
                 "scrambled": team["current_scramble"], 
                 "attempts": team["p1_attempts"]
             }
-        
-        # --- P2 LOGIC ---
         else:
             active = team["p1_idx"] > team["p2_idx"]
-            
-            if "p2_dice_sum" not in team:
-                 team["p2_dice_sum"] = None
-
+            if "p2_dice_sum" not in team: team["p2_dice_sum"] = None
             if active and team["p2_dice_sum"] is None:
-                # FIX: Set P2 sentence length between 4 and 10 words
                 team["p2_dice_sum"] = random.randint(4, 10)
             
             target = team["p1_solved_history"][team["p2_idx"]] if active else ""
@@ -223,12 +234,10 @@ def api_action():
         return jsonify({"status": "penalty"})
 
     if action == "guess" and game["state"] == "running":
-        # FIX: Lowercase BOTH inputs so "Apple" matches "apple"
         guess = data.get("value", "").lower().strip()
         actual = game["words"][team["p1_idx"]].lower() 
         
         if guess == actual:
-            # Store the actual original word for P2 to see (Capitalized is fine here)
             team["p1_solved_history"].append(game["words"][team["p1_idx"]])
             team["score"] += 50 + (team["p1_attempts"] * 10)
             team["p1_idx"] += 1
@@ -243,8 +252,6 @@ def api_action():
     if action == "submit_sentence" and game["state"] == "running":
         words = re.findall(r'\b\w+\b', data.get("value", ""))
         required = team["p2_dice_sum"]
-        
-        # FIX: Ensure target check is also case-insensitive
         target = team["p1_solved_history"][team["p2_idx"]].lower()
         
         if len(words) != required:
