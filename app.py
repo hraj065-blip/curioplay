@@ -4,6 +4,7 @@ import time
 import random
 import re
 import os
+import requests  # REQUIRED for Grammar API
 from flask import (
     Flask, render_template, request, redirect,
     url_for, session, jsonify, abort
@@ -143,6 +144,7 @@ def api_sync():
 
     time_left = max(0, int(game["end_time"] - time.time())) if game["state"] == "running" else 0
     
+    # Auto-End Logic
     if game["state"] == "running" and time_left <= 0:
         game["state"] = "finished"
 
@@ -182,8 +184,9 @@ def api_action():
     if not game or not team: return jsonify({"status":"error"})
     action = data.get("action")
 
+    # --- PENALTY LOGIC ---
     if action == "cheat_tab_switch":
-        team["score"] = max(0, team["score"] - 5)
+        team["score"] = max(0, team["score"] - 100) # -100 Points
         return jsonify({"status": "penalty"})
 
     if action == "guess" and game["state"] == "running":
@@ -200,12 +203,42 @@ def api_action():
         team["p1_attempts"] -= 1
         return jsonify({"status": "wrong"})
 
+    # --- HYBRID SENTENCE VALIDATION ---
     if action == "submit_sentence" and game["state"] == "running":
-        words = re.findall(r'\b\w+\b', data.get("value", ""))
+        val = data.get("value", "").strip()
         required = team["p2_dice_sum"]
         target = team["p1_solved_history"][team["p2_idx"]].lower()
-        if len(words) != required: return jsonify({"status": "error", "msg": f"Need exactly {required} words"})
-        if target not in [w.lower() for w in words]: return jsonify({"status": "error", "msg": f"Must include '{target}'"})
+        
+        # 1. Basic Checks
+        if not val:
+            return jsonify({"status": "error", "msg": "Type a sentence first!"})
+            
+        words = re.findall(r'\b\w+\b', val)
+        if len(words) != required:
+            return jsonify({"status": "error", "msg": f"Need exactly {required} words"})
+            
+        if target not in [w.lower() for w in words]:
+             return jsonify({"status": "error", "msg": f"Must include '{target}'"})
+
+        # 2. Hybrid API Check
+        try:
+            resp = requests.post(
+                "https://api.languagetool.org/v2/check",
+                data={'text': val, 'language': 'en-US'},
+                timeout=2
+            )
+            if resp.status_code == 200:
+                matches = resp.json().get('matches', [])
+                for m in matches:
+                    if m['rule']['issueType'] in ['grammar', 'misspelling']:
+                        return jsonify({"status": "error", "msg": f"Grammar: {m['message']}"})
+        except Exception:
+            # API Failed/Timeout -> Fallback to Local Rules
+            if not val[0].isupper():
+                return jsonify({"status": "error", "msg": "Start with a Capital letter!"})
+            if val[-1] not in ['.', '!', '?']:
+                return jsonify({"status": "error", "msg": "End with punctuation (. ! ?)"})
+
         team["score"] += required * 5
         return jsonify({"status": "correct"})
 
