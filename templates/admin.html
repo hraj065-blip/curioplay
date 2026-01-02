@@ -1,21 +1,70 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+    /* Red Dot Animation */
+    .live-indicator {
+        width: 12px;
+        height: 12px;
+        background-color: #ff3b3b;
+        border-radius: 50%;
+        display: inline-block;
+        box-shadow: 0 0 0 0 rgba(255, 59, 59, 0.7);
+        animation: pulse-red 2s infinite;
+        margin-right: 8px;
+    }
+    @keyframes pulse-red {
+        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 59, 59, 0.7); }
+        70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(255, 59, 59, 0); }
+        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 59, 59, 0); }
+    }
+</style>
+
 <div class="container-fluid py-4">
     <div class="row mb-4 align-items-center">
         <div class="col-md-6">
-            <h1 class="text-white fw-bold">Admin Panel <span class="badge bg-danger fs-6 align-top">HOST</span></h1>
+            <h1 class="text-white fw-bold">
+                Admin Panel 
+                <span class="badge bg-danger fs-6 align-top">HOST</span>
+            </h1>
             <p class="text-secondary mb-0">Game ID: <span class="text-warning font-monospace fs-5">{{ game.id }}</span></p>
         </div>
         <div class="col-md-6 text-end">
-            <a href="/qrcode/{{ game.id }}" target="_blank" class="btn btn-info btn-lg fw-bold me-2">
-                <i class="bi bi-qr-code"></i> Show QR Code
-            </a>
-            
             <button id="startBtn" onclick="startGame()" class="btn btn-success btn-lg fw-bold text-uppercase px-5" 
                 {% if game.state == 'running' %}disabled style="opacity: 0.5"{% endif %}>
                 Start Round
             </button>
+        </div>
+    </div>
+
+    <div class="card bg-dark border-secondary mb-4">
+        <div class="card-body">
+            <h5 class="text-white mb-3">Player Join Info</h5>
+            <div class="row align-items-center">
+                <div class="col-md-8 mb-3 mb-md-0">
+                    <label class="text-secondary small text-uppercase">Share this URL:</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control bg-black text-white border-secondary font-monospace" 
+                               value="{{ request.host_url }}join/{{ game.id }}" id="joinLink" readonly>
+                        <button class="btn btn-outline-light" onclick="copyLink()">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-4 text-center">
+                    <button class="btn btn-warning w-100" type="button" data-bs-toggle="collapse" data-bs-target="#qrCollapse">
+                        <i class="bi bi-qr-code"></i> Show QR Code
+                    </button>
+                </div>
+            </div>
+            
+            <div class="collapse mt-3 text-center" id="qrCollapse">
+                <div class="p-3 bg-white rounded d-inline-block">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={{ request.host_url }}join/{{ game.id }}" 
+                         alt="QR Code" class="img-fluid">
+                </div>
+                <p class="text-muted small mt-2">Scan to join immediately</p>
+            </div>
         </div>
     </div>
 
@@ -25,7 +74,12 @@
                 <div class="card-body d-flex justify-content-between align-items-center">
                     <div>
                         <span class="text-secondary text-uppercase small">Status</span>
-                        <h3 class="text-white m-0" id="statusBadge">{{ game.state|upper }}</h3>
+                        <div class="d-flex align-items-center mt-1">
+                            {% if game.state == 'running' %}
+                                <div class="live-indicator"></div>
+                            {% endif %}
+                            <h3 class="text-white m-0" id="statusBadge">{{ game.state|upper }}</h3>
+                        </div>
                     </div>
                     <div class="text-end">
                         <span class="text-secondary text-uppercase small">Time Remaining</span>
@@ -68,9 +122,15 @@
 <script>
     const GAME_ID = "{{ game.id }}";
     
+    function copyLink() {
+        const copyText = document.getElementById("joinLink");
+        copyText.select();
+        navigator.clipboard.writeText(copyText.value);
+        alert("Link copied!");
+    }
+
     async function startGame() {
         if(!confirm("Start the round? All players should be ready.")) return;
-        
         const btn = document.getElementById("startBtn");
         btn.innerText = "Starting...";
         btn.disabled = true;
@@ -92,7 +152,7 @@
         } catch(e) { console.error(e); }
     }
 
-    // POLL DATA EVERY 2 SECONDS
+    // POLL DATA
     setInterval(async () => {
         try {
             const res = await fetch(`/api/sync`, { method: 'POST' });
@@ -103,6 +163,12 @@
             const s = sync.time_left % 60;
             document.getElementById("timer").innerText = `${m}:${s.toString().padStart(2, '0')}`;
             
+            // Check if game finished
+            if(sync.state === "finished") {
+                document.getElementById("statusBadge").innerText = "FINISHED";
+                document.querySelector(".live-indicator")?.remove();
+            }
+
             // Update Leaderboard
             const lbRes = await fetch(`/api/leaderboard/${GAME_ID}`);
             const lbData = await lbRes.json();
