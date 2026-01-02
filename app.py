@@ -4,15 +4,12 @@ import time
 import random
 import re
 import os
-import io
-import qrcode
 from flask import (
     Flask, render_template, request, redirect,
-    url_for, session, jsonify, abort, send_file
+    url_for, session, jsonify, abort
 )
 
 app = Flask(__name__)
-# Use environment variable for production security, fallback for local testing
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(16))
 
 # ===============================
@@ -25,11 +22,8 @@ WORD_BANK = [
     "Zebra", "Beach", "Cloud", "Dance", "Earth", "Fruit", "Green", "House", 
     "Light", "Money", "Onion", "Piano", "Radio", "Shirt", "Tiger", "Train", 
     "Watch", "World", "Chair", "Dress", "Glass", "Mouse", "Phone", "Spoon", 
-    "Truck", "Plant", "river", "table", "cloud", "stone", "light", "bread", "green", "smile", "grass",
-    "desert", "forest", "summer", "winter", "spring", "travel", "silver", "sunset", "bright", "gentle",
-    "morning", "evening", "harmony", "freedom", "balance", "picture", "lantern", "journey", "crystal", "meadow",
-    "melody", "ocean", "horizon", "captain", "village", "canyon", "planet", "harbor", "beacon", "memory"
-]*3
+    "Truck", "Plant"
+]
 
 GAMES = {}
 
@@ -91,25 +85,16 @@ def join_page(game_id):
 
         if team_name not in game["teams"]:
             game["teams"][team_name] = {
-                "name": team_name, 
-                "score": 0, 
-                "p1_idx": 0, 
-                "p2_idx": 0,
-                "p1_solved_history": [], 
-                "p1_attempts": 5, 
-                "p2_dice_sum": None, 
-                "current_scramble": None,
-                "current_scramble_idx": -1,
-                "players": {}
+                "name": team_name, "score": 0, "p1_idx": 0, "p2_idx": 0,
+                "p1_solved_history": [], "p1_attempts": 5, "p2_dice_sum": None, 
+                "current_scramble": None, "current_scramble_idx": -1, "players": {}
             }
         
         token = make_id(8)
         game["teams"][team_name]["players"][token] = {"name": player_name, "role": role}
-
         session["game_id"] = game_id
         session["team_name"] = team_name
         session["token"] = token
-        
         return redirect(url_for("player_page"))
 
     return render_template("join.html", game=game)
@@ -123,35 +108,16 @@ def player_page():
     game = GAMES.get(game_id)
     team = game["teams"].get(team_name)
     if not team: return redirect(url_for("index"))
-    
     return render_template("player.html", game=game, team=team, player=team["players"].get(session.get("token")), token=session.get("token"))
-
-# ===============================
-# QR CODE ROUTE (NEW)
-# ===============================
-@app.route("/qrcode/<game_id>")
-def get_qrcode(game_id):
-    # Generates a QR code for the join link of this specific game
-    # _external=True ensures it uses the full https:// domain (e.g. Render URL)
-    join_url = url_for('join_page', game_id=game_id, _external=True)
-    
-    img = qrcode.make(join_url)
-    buf = io.BytesIO()
-    img.save(buf)
-    buf.seek(0)
-    
-    return send_file(buf, mimetype='image/png')
 
 # ===============================
 # API LOGIC
 # ===============================
-
 @app.route("/api/start", methods=["POST"])
 def api_start():
     data = request.json or {}
     game_id = data.get("game_id") or session.get("game_id")
     if not game_id and GAMES: game_id = list(GAMES.keys())[-1]
-
     game = GAMES.get(game_id)
     if game:
         game["state"] = "running"
@@ -177,7 +143,6 @@ def api_sync():
 
     time_left = max(0, int(game["end_time"] - time.time())) if game["state"] == "running" else 0
     
-    # Auto-End Logic
     if game["state"] == "running" and time_left <= 0:
         game["state"] = "finished"
 
@@ -189,34 +154,23 @@ def api_sync():
 
     if token in team["players"]:
         role = team["players"][token]["role"].lower()
-        
         if role == "p1":
             current_idx = team["p1_idx"]
             if "current_scramble_idx" not in team:
                 team["current_scramble_idx"] = -1
                 team["current_scramble"] = None
-            
             if team["current_scramble_idx"] != current_idx:
                 raw_word = game["words"][current_idx]
                 team["current_scramble"] = scramble(raw_word)
                 team["current_scramble_idx"] = current_idx
-            
-            response["p1_data"] = {
-                "scrambled": team["current_scramble"], 
-                "attempts": team["p1_attempts"]
-            }
+            response["p1_data"] = {"scrambled": team["current_scramble"], "attempts": team["p1_attempts"]}
         else:
             active = team["p1_idx"] > team["p2_idx"]
             if "p2_dice_sum" not in team: team["p2_dice_sum"] = None
             if active and team["p2_dice_sum"] is None:
                 team["p2_dice_sum"] = random.randint(4, 10)
-            
             target = team["p1_solved_history"][team["p2_idx"]] if active else ""
-            response["p2_data"] = {
-                "active": active, 
-                "target_word": target, 
-                "dice_sum": team["p2_dice_sum"]
-            }
+            response["p2_data"] = {"active": active, "target_word": target, "dice_sum": team["p2_dice_sum"]}
 
     return jsonify(response)
 
@@ -226,7 +180,6 @@ def api_action():
     game = GAMES.get(session.get("game_id"))
     team = game["teams"].get(session.get("team_name"))
     if not game or not team: return jsonify({"status":"error"})
-
     action = data.get("action")
 
     if action == "cheat_tab_switch":
@@ -236,7 +189,6 @@ def api_action():
     if action == "guess" and game["state"] == "running":
         guess = data.get("value", "").lower().strip()
         actual = game["words"][team["p1_idx"]].lower() 
-        
         if guess == actual:
             team["p1_solved_history"].append(game["words"][team["p1_idx"]])
             team["score"] += 50 + (team["p1_attempts"] * 10)
@@ -245,7 +197,6 @@ def api_action():
             team["p2_idx"] = team["p1_idx"] - 1
             team["p2_dice_sum"] = None
             return jsonify({"status": "correct"})
-        
         team["p1_attempts"] -= 1
         return jsonify({"status": "wrong"})
 
@@ -253,13 +204,8 @@ def api_action():
         words = re.findall(r'\b\w+\b', data.get("value", ""))
         required = team["p2_dice_sum"]
         target = team["p1_solved_history"][team["p2_idx"]].lower()
-        
-        if len(words) != required:
-            return jsonify({"status": "error", "msg": f"Need exactly {required} words"})
-        
-        if target not in [w.lower() for w in words]:
-             return jsonify({"status": "error", "msg": f"Must include '{target}'"})
-
+        if len(words) != required: return jsonify({"status": "error", "msg": f"Need exactly {required} words"})
+        if target not in [w.lower() for w in words]: return jsonify({"status": "error", "msg": f"Must include '{target}'"})
         team["score"] += required * 5
         return jsonify({"status": "correct"})
 
