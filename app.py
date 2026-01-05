@@ -47,6 +47,17 @@ def scramble(word):
         if "".join(arr) != word:
             return "".join(arr)
 
+def cleanup_old_games():
+    """Removes games older than 4 hours to save memory."""
+    current_time = time.time()
+    expired = []
+    for gid, game in GAMES.items():
+        # If game started > 4 hours ago, delete it
+        if game.get("start_time") and (current_time - game["start_time"] > 14400):
+            expired.append(gid)
+    for gid in expired:
+        del GAMES[gid]
+
 # ===============================
 # PAGE ROUTES
 # ===============================
@@ -56,6 +67,8 @@ def index():
 
 @app.route("/create_game", methods=["POST"])
 def create_game():
+    cleanup_old_games() # Run cleanup whenever a new game is made
+    
     data = request.json or {}
     duration = int(data.get("duration", 10))
     game_id = make_id(5)
@@ -90,9 +103,17 @@ def join_page(game_id):
 
         if team_name not in game["teams"]:
             game["teams"][team_name] = {
-                "name": team_name, "score": 0, "p1_idx": 0, "p2_idx": 0,
-                "p1_solved_history": [], "p1_attempts": 5, "p2_dice_sum": None, 
-                "current_scramble": None, "current_scramble_idx": -1, "players": {}
+                "name": team_name, 
+                "score": 0, 
+                "p1_idx": 0, 
+                "p2_idx": 0,
+                "p1_solved_history": [], 
+                "p1_attempts": 5, 
+                "p2_dice_sum": None, 
+                "used_sentences": [], # <--- FIX 1: Initialize History List
+                "current_scramble": None, 
+                "current_scramble_idx": -1, 
+                "players": {}
             }
         
         token = make_id(8)
@@ -111,7 +132,8 @@ def player_page():
     if not game_id or not team_name: return redirect(url_for("index"))
     
     game = GAMES.get(game_id)
-    team = game["teams"].get(team_name)
+    team = game["teams"].get(team_name) if game else None
+    
     if not team: return redirect(url_for("index"))
     return render_template("player.html", game=game, team=team, player=team["players"].get(session.get("token")), token=session.get("token"))
 
@@ -148,7 +170,6 @@ def api_sync():
 
     time_left = max(0, int(game["end_time"] - time.time())) if game["state"] == "running" else 0
     
-    # Auto-End Logic
     if game["state"] == "running" and time_left <= 0:
         game["state"] = "finished"
 
@@ -171,10 +192,14 @@ def api_sync():
                 team["current_scramble_idx"] = current_idx
             response["p1_data"] = {"scrambled": team["current_scramble"], "attempts": team["p1_attempts"]}
         else:
+            # Player 2 Logic
             active = team["p1_idx"] > team["p2_idx"]
             if "p2_dice_sum" not in team: team["p2_dice_sum"] = None
+            
+            # Auto-roll dice if needed
             if active and team["p2_dice_sum"] is None:
                 team["p2_dice_sum"] = random.randint(4, 10)
+            
             target = team["p1_solved_history"][team["p2_idx"]] if active else ""
             response["p2_data"] = {"active": active, "target_word": target, "dice_sum": team["p2_dice_sum"]}
 
@@ -190,9 +215,10 @@ def api_action():
 
     # --- PENALTY LOGIC ---
     if action == "cheat_tab_switch":
-        team["score"] = max(0, team["score"] - 100) # -100 Points
+        team["score"] = max(0, team["score"] - 100)
         return jsonify({"status": "penalty"})
 
+    # --- PLAYER 1 GUESS ---
     if action == "guess" and game["state"] == "running":
         guess = data.get("value", "").lower().strip()
         actual = game["words"][team["p1_idx"]].lower() 
@@ -201,16 +227,20 @@ def api_action():
             team["score"] += 50 + (team["p1_attempts"] * 10)
             team["p1_idx"] += 1
             team["p1_attempts"] = 5
-            team["p2_idx"] = team["p1_idx"] - 1
-            team["p2_dice_sum"] = None
+            # Note: We do NOT reset P2 here. P2 advances on their own success.
             return jsonify({"status": "correct"})
         team["p1_attempts"] -= 1
         return jsonify({"status": "wrong"})
 
-    # --- HYBRID SENTENCE VALIDATION ---
+    # --- PLAYER 2 SUBMIT ---
     if action == "submit_sentence" and game["state"] == "running":
         val = data.get("value", "").strip()
         required = team["p2_dice_sum"]
+        
+        # Safety check: Ensure P2 is actually active
+        if team["p2_idx"] >= len(team["p1_solved_history"]):
+             return jsonify({"status": "error", "msg": "Wait for Player 1!"})
+
         target = team["p1_solved_history"][team["p2_idx"]].lower()
         
         # 1. Basic Checks
@@ -223,6 +253,12 @@ def api_action():
             
         if target not in [w.lower() for w in words]:
              return jsonify({"status": "error", "msg": f"Must include '{target}'"})
+
+        # --- FIX 2: Check for Duplicates ---
+        # Prevent spamming the same sentence
+        used = [s.lower() for s in team.get("used_sentences", [])]
+        if val.lower() in used:
+             return jsonify({"status": "error", "msg": "You already used that sentence!"})
 
         # 2. Hybrid API Check
         try:
@@ -237,13 +273,22 @@ def api_action():
                     if m['rule']['issueType'] in ['grammar', 'misspelling']:
                         return jsonify({"status": "error", "msg": f"Grammar: {m['message']}"})
         except Exception:
-            # API Failed/Timeout -> Fallback to Local Rules
+            # Fallback
             if not val[0].isupper():
                 return jsonify({"status": "error", "msg": "Start with a Capital letter!"})
             if val[-1] not in ['.', '!', '?']:
                 return jsonify({"status": "error", "msg": "End with punctuation (. ! ?)"})
 
+        # --- SUCCESS LOGIC ---
         team["score"] += required * 5
+        
+        # 3. FIX 3: Advance State Logic
+        if "used_sentences" not in team: team["used_sentences"] = []
+        team["used_sentences"].append(val)
+        
+        team["p2_idx"] += 1         # Move P2 to the next word
+        team["p2_dice_sum"] = None  # Reset dice for the next turn
+
         return jsonify({"status": "correct"})
 
     return jsonify({"status": "error"})
@@ -256,4 +301,5 @@ def api_leaderboard(game_id):
     return jsonify(sorted(lb, key=lambda x: x["score"], reverse=True)[:8])
 
 if __name__ == "__main__":
+    # FOR LOCAL TESTING ONLY. Render uses Gunicorn via Procfile or Start Command.
     app.run(host="0.0.0.0", port=5005, debug=True, threaded=True)
