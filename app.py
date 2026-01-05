@@ -11,7 +11,10 @@ from flask import (
 )
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(16))
+
+# --- CRITICAL FIX: STATIC SECRET KEY ---
+# This prevents "Session Mismatch" errors if the server restarts.
+app.secret_key = os.environ.get("SECRET_KEY", "Keep_This_Static_Key_Safe_For_Event_2026")
 
 # ===============================
 # CONFIGURATION
@@ -126,13 +129,33 @@ def join_page(game_id):
 def player_page():
     game_id = session.get("game_id")
     team_name = session.get("team_name")
-    if not game_id or not team_name: return redirect(url_for("index"))
+    token = session.get("token")
+    
+    # --- CRITICAL FIX: CRASH PROOFING ---
+    # If server restarted and memory is wiped, these checks prevent 500 Errors.
+    
+    # 1. Check Session Data
+    if not game_id or not team_name or not token:
+        return redirect(url_for("index"))
     
     game = GAMES.get(game_id)
-    team = game["teams"].get(team_name) if game else None
+    # 2. Check Game Memory
+    if not game:
+        session.clear() 
+        return redirect(url_for("index"))
     
-    if not team: return redirect(url_for("index"))
-    return render_template("player.html", game=game, team=team, player=team["players"].get(session.get("token")), token=session.get("token"))
+    team = game["teams"].get(team_name)
+    # 3. Check Team Memory
+    if not team:
+        return redirect(url_for("index"))
+        
+    player = team["players"].get(token)
+    # 4. Check Player Memory
+    if not player:
+        session.clear()
+        return redirect(url_for("index"))
+
+    return render_template("player.html", game=game, team=team, player=player, token=token)
 
 # ===============================
 # API LOGIC
@@ -189,7 +212,7 @@ def api_sync():
                 team["current_scramble_idx"] = current_idx
             response["p1_data"] = {"scrambled": team["current_scramble"], "attempts": team["p1_attempts"]}
         else:
-            # --- P2 LOGIC FIX: ALWAYS TARGET LAST SOLVED WORD ---
+            # Player 2 Logic: Always target the LATEST word solved by P1
             active = len(team["p1_solved_history"]) > 0
             
             if "p2_dice_sum" not in team: team["p2_dice_sum"] = None
@@ -198,7 +221,6 @@ def api_sync():
             if active and team["p2_dice_sum"] is None:
                 team["p2_dice_sum"] = random.randint(4, 10)
             
-            # Target is the LATEST word ([-1]), allowing continuous play until update
             target = team["p1_solved_history"][-1] if active else ""
             response["p2_data"] = {"active": active, "target_word": target, "dice_sum": team["p2_dice_sum"]}
 
@@ -223,7 +245,7 @@ def api_action():
         actual = game["words"][team["p1_idx"]].lower() 
         if guess == actual:
             team["p1_solved_history"].append(game["words"][team["p1_idx"]])
-            team["score"] += 50 + (team["p1_attempts"] * 10)
+            team["score"] += 10 + (team["p1_attempts"] * 10)
             team["p1_idx"] += 1
             team["p1_attempts"] = 5
             return jsonify({"status": "correct"})
@@ -235,11 +257,11 @@ def api_action():
         val = data.get("value", "").strip()
         required = team["p2_dice_sum"]
         
-        # FIX: Check if there is ANY solved word to target
+        # Check if there is ANY solved word to target
         if not team["p1_solved_history"]:
              return jsonify({"status": "error", "msg": "Wait for Player 1!"})
 
-        # FIX: Always validate against the LATEST word
+        # Validate against the LATEST word
         target = team["p1_solved_history"][-1].lower()
         
         # 1. Basic Checks
@@ -253,12 +275,12 @@ def api_action():
         if target not in [w.lower() for w in words]:
              return jsonify({"status": "error", "msg": f"Must include '{target}'"})
 
-        # Check for Duplicates
+        # 2. Duplicate Check
         used = [s.lower() for s in team.get("used_sentences", [])]
         if val.lower() in used:
              return jsonify({"status": "error", "msg": "You already used that sentence!"})
 
-        # 2. Hybrid API Check (Grammar)
+        # 3. Hybrid API Check (Grammar)
         try:
             resp = requests.post(
                 "https://api.languagetool.org/v2/check",
@@ -283,9 +305,7 @@ def api_action():
         if "used_sentences" not in team: team["used_sentences"] = []
         team["used_sentences"].append(val)
         
-        # FIX: We do NOT advance an index. We just reset the Dice.
-        # This keeps P2 on the same word (with new length challenge)
-        # until P1 solves a NEW word (which updates p1_solved_history[-1])
+        # Reset dice only (keeps P2 on the same word to "farm" points)
         team["p2_dice_sum"] = None 
 
         return jsonify({"status": "correct"})
