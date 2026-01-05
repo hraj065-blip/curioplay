@@ -109,13 +109,15 @@
             document.getElementById("p2Input").value = "";
             Swal.fire({ icon: 'success', title: 'SENT!', toast: true, position: 'top', timer: 1000, showConfirmButton: false });
         } else {
+            // This now displays backend errors like "You already used that sentence!"
             Swal.fire({ icon: 'warning', title: data.msg || 'Invalid' });
         }
     }
 
-    // SYNC LOOP
+    // SYNC LOOP - OPTIMIZED FOR 60 PLAYERS
     setInterval(async () => {
         try {
+            // Using ?t=Date.now() prevents browser caching
             const res = await fetch('/api/sync?t=' + Date.now(), { method: 'POST' });
             if(!res.ok) return;
             const data = await res.json();
@@ -163,7 +165,7 @@
                 `;
             }
         } catch(e) { console.error(e); }
-    }, 1000);
+    }, 3000); // <--- CRITICAL FIX: Changed 1000 to 3000 (3 seconds)
 
     // --- CHEAT DETECTION (TAB SWITCHING) ---
     document.addEventListener("visibilitychange", async () => {
