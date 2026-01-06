@@ -90,7 +90,12 @@
         
         if(data.status === "correct") {
             Swal.fire({ icon: 'success', title: 'CORRECT!', toast: true, position: 'top', timer: 1000, showConfirmButton: false });
-        } else {
+        } 
+        else if (data.status === "skip") {
+            // NEW: Handle skipping when attempts run out
+            Swal.fire({ icon: 'info', title: 'Out of Attempts!', text: 'Skipping to next word...', timer: 1500, showConfirmButton: false });
+        }
+        else {
             input.value = oldVal;
             Swal.fire({ icon: 'error', title: 'WRONG', toast: true, position: 'top', timer: 1000, showConfirmButton: false });
         }
@@ -113,7 +118,7 @@
         }
     }
 
-    // SYNC LOOP - 2 SECONDS (Safe & Fast)
+    // SYNC LOOP - 2000ms (Safe for 60 players)
     setInterval(async () => {
         try {
             const res = await fetch('/api/sync?t=' + Date.now(), { method: 'POST' });
