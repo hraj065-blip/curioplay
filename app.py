@@ -12,8 +12,8 @@ from flask import (
 
 app = Flask(__name__)
 
-# --- CRITICAL FIX: STATIC SECRET KEY ---
-# This prevents "Session Mismatch" errors if the server restarts.
+# --- CONFIG: STATIC SECRET KEY ---
+# Prevents users getting logged out if server restarts
 app.secret_key = os.environ.get("SECRET_KEY", "Keep_This_Static_Key_Safe_For_Event_2026")
 
 # ===============================
@@ -127,30 +127,25 @@ def join_page(game_id):
 
 @app.route("/play")
 def player_page():
+    # --- CRASH PROOF LOGIC ---
+    # Handles server restarts gracefully by redirecting to home instead of 500 Error
     game_id = session.get("game_id")
     team_name = session.get("team_name")
     token = session.get("token")
     
-    # --- CRITICAL FIX: CRASH PROOFING ---
-    # If server restarted and memory is wiped, these checks prevent 500 Errors.
-    
-    # 1. Check Session Data
     if not game_id or not team_name or not token:
         return redirect(url_for("index"))
     
     game = GAMES.get(game_id)
-    # 2. Check Game Memory
     if not game:
         session.clear() 
         return redirect(url_for("index"))
     
     team = game["teams"].get(team_name)
-    # 3. Check Team Memory
     if not team:
         return redirect(url_for("index"))
         
     player = team["players"].get(token)
-    # 4. Check Player Memory
     if not player:
         session.clear()
         return redirect(url_for("index"))
@@ -206,7 +201,7 @@ def api_sync():
             if "current_scramble_idx" not in team:
                 team["current_scramble_idx"] = -1
                 team["current_scramble"] = None
-            if team["current_scramble_idx"] != current_idx:
+            if team["current_scramble_idx"] != current_idx and current_idx < len(game["words"]):
                 raw_word = game["words"][current_idx]
                 team["current_scramble"] = scramble(raw_word)
                 team["current_scramble_idx"] = current_idx
@@ -242,14 +237,29 @@ def api_action():
     # --- PLAYER 1 GUESS ---
     if action == "guess" and game["state"] == "running":
         guess = data.get("value", "").lower().strip()
+        
+        # Check boundaries
+        if team["p1_idx"] >= len(game["words"]):
+             return jsonify({"status": "finished"})
+
         actual = game["words"][team["p1_idx"]].lower() 
+        
         if guess == actual:
             team["p1_solved_history"].append(game["words"][team["p1_idx"]])
-            team["score"] += 10 + (team["p1_attempts"] * 10)
+            team["score"] += 50 + (team["p1_attempts"] * 10)
             team["p1_idx"] += 1
             team["p1_attempts"] = 5
             return jsonify({"status": "correct"})
+        
+        # Wrong guess
         team["p1_attempts"] -= 1
+        
+        # --- NEW SKIP LOGIC ---
+        if team["p1_attempts"] <= 0:
+            team["p1_idx"] += 1      # Skip current word
+            team["p1_attempts"] = 5  # Reset attempts
+            return jsonify({"status": "skip", "msg": "Out of attempts! Skipping word."})
+
         return jsonify({"status": "wrong"})
 
     # --- PLAYER 2 SUBMIT ---
