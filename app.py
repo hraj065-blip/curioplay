@@ -13,7 +13,6 @@ from flask import (
 app = Flask(__name__)
 
 # --- CONFIG: STATIC SECRET KEY ---
-# Prevents users getting logged out if server restarts
 app.secret_key = os.environ.get("SECRET_KEY", "Keep_This_Static_Key_Safe_For_Event_2026")
 
 # ===============================
@@ -127,8 +126,6 @@ def join_page(game_id):
 
 @app.route("/play")
 def player_page():
-    # --- CRASH PROOF LOGIC ---
-    # Handles server restarts gracefully by redirecting to home instead of 500 Error
     game_id = session.get("game_id")
     team_name = session.get("team_name")
     token = session.get("token")
@@ -207,15 +204,10 @@ def api_sync():
                 team["current_scramble_idx"] = current_idx
             response["p1_data"] = {"scrambled": team["current_scramble"], "attempts": team["p1_attempts"]}
         else:
-            # Player 2 Logic: Always target the LATEST word solved by P1
             active = len(team["p1_solved_history"]) > 0
-            
             if "p2_dice_sum" not in team: team["p2_dice_sum"] = None
-            
-            # Auto-roll dice if active and no dice set
             if active and team["p2_dice_sum"] is None:
                 team["p2_dice_sum"] = random.randint(4, 10)
-            
             target = team["p1_solved_history"][-1] if active else ""
             response["p2_data"] = {"active": active, "target_word": target, "dice_sum": team["p2_dice_sum"]}
 
@@ -254,11 +246,12 @@ def api_action():
         # Wrong guess
         team["p1_attempts"] -= 1
         
-        # --- NEW SKIP LOGIC ---
+        # --- SKIP LOGIC (-20 Penalty) ---
         if team["p1_attempts"] <= 0:
             team["p1_idx"] += 1      # Skip current word
             team["p1_attempts"] = 5  # Reset attempts
-            return jsonify({"status": "skip", "msg": "Out of attempts! Skipping word."})
+            team["score"] -= 20      # <--- DEDUCT 20 POINTS
+            return jsonify({"status": "skip", "msg": "Out of attempts! -20 Points."})
 
         return jsonify({"status": "wrong"})
 
@@ -267,14 +260,11 @@ def api_action():
         val = data.get("value", "").strip()
         required = team["p2_dice_sum"]
         
-        # Check if there is ANY solved word to target
         if not team["p1_solved_history"]:
              return jsonify({"status": "error", "msg": "Wait for Player 1!"})
 
-        # Validate against the LATEST word
         target = team["p1_solved_history"][-1].lower()
         
-        # 1. Basic Checks
         if not val:
             return jsonify({"status": "error", "msg": "Type a sentence first!"})
             
@@ -285,12 +275,10 @@ def api_action():
         if target not in [w.lower() for w in words]:
              return jsonify({"status": "error", "msg": f"Must include '{target}'"})
 
-        # 2. Duplicate Check
         used = [s.lower() for s in team.get("used_sentences", [])]
         if val.lower() in used:
              return jsonify({"status": "error", "msg": "You already used that sentence!"})
 
-        # 3. Hybrid API Check (Grammar)
         try:
             resp = requests.post(
                 "https://api.languagetool.org/v2/check",
@@ -303,19 +291,16 @@ def api_action():
                     if m['rule']['issueType'] in ['grammar', 'misspelling']:
                         return jsonify({"status": "error", "msg": f"Grammar: {m['message']}"})
         except Exception:
-            # Fallback
             if not val[0].isupper():
                 return jsonify({"status": "error", "msg": "Start with a Capital letter!"})
             if val[-1] not in ['.', '!', '?']:
                 return jsonify({"status": "error", "msg": "End with punctuation (. ! ?)"})
 
-        # --- SUCCESS LOGIC ---
         team["score"] += required * 5
         
         if "used_sentences" not in team: team["used_sentences"] = []
         team["used_sentences"].append(val)
         
-        # Reset dice only (keeps P2 on the same word to "farm" points)
         team["p2_dice_sum"] = None 
 
         return jsonify({"status": "correct"})
