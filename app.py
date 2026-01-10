@@ -13,23 +13,38 @@ from flask import (
 app = Flask(__name__)
 
 # --- CONFIG: STATIC SECRET KEY ---
+# Keeps players logged in even if the server restarts
 app.secret_key = os.environ.get("SECRET_KEY", "Keep_This_Static_Key_Safe_For_Event_2026")
 
 # ===============================
 # CONFIGURATION
 # ===============================
+# 150 Slightly Difficult, Unambiguous Words (5-7 Letters)
 WORD_BANK = [
-    "Apple", "Bread", "Candy", "Dream", "Eagle", "Flame", "Grape", "Heart", 
-    "Island", "Juice", "Knife", "Lemon", "Music", "Night", "Ocean", "Paper", 
-    "Queen", "River", "Stone", "Table", "Uncle", "Voice", "Water", "Young", 
-    "Zebra", "Beach", "Cloud", "Dance", "Earth", "Fruit", "Green", "House", 
-    "Light", "Money", "Onion", "Piano", "Radio", "Shirt", "Tiger", "Train", 
-    "Watch", "World", "Chair", "Dress", "Glass", "Mouse", "Phone", "Spoon", 
-    "Truck", "Plant","tree", "moon", "star", "book", "lake", "wind", "sand", "rock", "road", "snow",
-    "apple", "river", "table", "cloud", "stone", "light", "bread", "green", "smile", "grass",
-    "desert", "forest", "summer", "winter", "spring", "travel", "silver", "sunset", "bright", "gentle",
-    "morning", "evening", "harmony", "freedom", "balance", "picture", "lantern", "journey", "crystal", "meadow",
-    "melody", "ocean", "horizon", "captain", "village", "canyon", "planet", "harbor", "beacon", "memory"
+    # 5-Letter Words
+    "Quartz", "Jumbo", "Vigor", "Whisk", "Glyph", "Klutz", "Jerky", "Quack", 
+    "Check", "Frock", "Wreck", "Pluck", "Brick", "Chick", "Quick", "Civic", 
+    "Vivid", "Kayak", "Refer", "Madam", "Rotor", "Limit", "Visit", "Habit", 
+    "Panic", "Topic", "Logic", "Magic", "Basic", "Rapid", "Solid", "Valid", 
+    "Rigid", "Humid", "Vapor", "Razor", "Major", "Mayor", "Labor", "Honor", 
+    "Error", "Proof", "Event", "Guest", "Heavy", "Hedge", "Human", "Image", 
+    "Index", "Juice",
+    # 6-Letter Words
+    "Jungle", "Puzzle", "Oxygen", "Rhythm", "Galaxy", "Luxury", "Hazard", "Wizard", 
+    "Lizard", "Quorum", "Vacuum", "Jockey", "Hijack", "Injury", "Adjust", "Object", 
+    "Reject", "Inject", "Impact", "Aspect", "Effect", "Defect", "Infect", "Detect", 
+    "Select", "Insect", "Script", "Strict", "Spirit", "Liquid", "Public", "Picnic", 
+    "Exotic", "Tactic", "Static", "Mosaic", "Fabric", "Garlic", "Critic", "Clinic", 
+    "Victim", "System", "Bishop", "Bottle", "Branch", "Bridge", "Bubble", "Bucket", 
+    "Button", "Camera",
+    # 7-Letter Words
+    "Journey", "Mystery", "Chimney", "Volcano", "Diamond", "Uniform", "Whiskey", "Horizon", 
+    "Pumpkin", "Buffalo", "Sparrow", "Rainbow", "Thunder", "Kingdom", "Freedom", "Wisdom", 
+    "Courage", "Justice", "Liberty", "Honesty", "Loyalty", "Gravity", "Quality", "Anxiety", 
+    "Society", "Variety", "Victory", "Century", "Crystal", "Pattern", "Village", "Traffic", 
+    "Baggage", "Luggage", "Cottage", "Message", "Passage", "Address", "Success", "Process", 
+    "Command", "Suggest", "Support", "Connect", "Collect", "Correct", "Account", "Unknown", 
+    "Upgrade", "Version"
 ]
 
 GAMES = {}
@@ -73,13 +88,16 @@ def create_game():
     duration = int(data.get("duration", 10))
     game_id = make_id(5)
     
+    # Ensure we have enough words for the game
+    game_words = random.sample(WORD_BANK * 5, 100)
+    
     GAMES[game_id] = {
         "id": game_id,
         "state": "lobby",
         "start_time": None,
         "end_time": None,
         "duration_sec": duration * 60,
-        "words": random.sample(WORD_BANK * 5, 100),
+        "words": game_words,
         "teams": {}
     }
     session["game_id"] = game_id
@@ -130,6 +148,7 @@ def player_page():
     team_name = session.get("team_name")
     token = session.get("token")
     
+    # CRASH PROOFING: Redirect to index if session/memory is invalid
     if not game_id or not team_name or not token:
         return redirect(url_for("index"))
     
@@ -198,10 +217,13 @@ def api_sync():
             if "current_scramble_idx" not in team:
                 team["current_scramble_idx"] = -1
                 team["current_scramble"] = None
+            
+            # Update Scramble if index changed
             if team["current_scramble_idx"] != current_idx and current_idx < len(game["words"]):
                 raw_word = game["words"][current_idx]
                 team["current_scramble"] = scramble(raw_word)
                 team["current_scramble_idx"] = current_idx
+            
             response["p1_data"] = {"scrambled": team["current_scramble"], "attempts": team["p1_attempts"]}
         else:
             active = len(team["p1_solved_history"]) > 0
@@ -230,7 +252,6 @@ def api_action():
     if action == "guess" and game["state"] == "running":
         guess = data.get("value", "").lower().strip()
         
-        # Check boundaries
         if team["p1_idx"] >= len(game["words"]):
              return jsonify({"status": "finished"})
 
@@ -243,15 +264,16 @@ def api_action():
             team["p1_attempts"] = 5
             return jsonify({"status": "correct"})
         
-        # Wrong guess
+        # Wrong Guess Logic
         team["p1_attempts"] -= 1
         
         # --- SKIP LOGIC (-20 Penalty) ---
         if team["p1_attempts"] <= 0:
+            team["p1_solved_history"].append(game["words"][team["p1_idx"]]) # Add skipped word so P2 can use it
             team["p1_idx"] += 1      # Skip current word
             team["p1_attempts"] = 5  # Reset attempts
-            team["score"] -= 20      # <--- DEDUCT 20 POINTS
-            return jsonify({"status": "skip", "msg": "Out of attempts! -20 Points."})
+            team["score"] = max(0, team["score"] - 20) # Deduct 20 Points (don't go negative)
+            return jsonify({"status": "wrong", "msg": "Out of attempts! Skipped & -20 Points."})
 
         return jsonify({"status": "wrong"})
 
@@ -310,9 +332,25 @@ def api_action():
 @app.route("/api/leaderboard/<game_id>")
 def api_leaderboard(game_id):
     game = GAMES.get(game_id)
-    if not game: return jsonify([])
+    # Default response if game not found
+    if not game: 
+        return jsonify({"leaderboard": [], "time_left": 0, "state": "lobby"})
+    
+    # 1. Get Scores
     lb = [{"name": t["name"], "score": t["score"]} for t in game["teams"].values()]
-    return jsonify(sorted(lb, key=lambda x: x["score"], reverse=True)[:8])
+    sorted_lb = sorted(lb, key=lambda x: x["score"], reverse=True)[:10]
+    
+    # 2. Get Time
+    time_left = 0
+    if game["state"] == "running" and game["end_time"]:
+        time_left = max(0, int(game["end_time"] - time.time()))
+    
+    # 3. Return EVERYTHING in one JSON
+    return jsonify({
+        "leaderboard": sorted_lb,
+        "time_left": time_left,
+        "state": game["state"]
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5005, debug=True, threaded=True)
