@@ -13,13 +13,11 @@ from flask import (
 app = Flask(__name__)
 
 # --- CONFIG: STATIC SECRET KEY ---
-# Keeps players logged in even if the server restarts
 app.secret_key = os.environ.get("SECRET_KEY", "Keep_This_Static_Key_Safe_For_Event_2026")
 
 # ===============================
 # CONFIGURATION
 # ===============================
-# 150 Slightly Difficult, Unambiguous Words (5-7 Letters)
 WORD_BANK = [
     # 5-Letter Words
     "Quartz", "Jumbo", "Vigor", "Whisk", "Glyph", "Klutz", "Jerky", "Quack", 
@@ -74,6 +72,46 @@ def cleanup_old_games():
     for gid in expired:
         del GAMES[gid]
 
+# --- NEW: STRICT VALIDATION HELPER ---
+def is_valid_sentence(text, target_word, required_length):
+    """
+    Returns (True, "") if valid, or (False, "Reason") if invalid.
+    Strictly filters 'lazy' or 'spam' sentences without using heavy AI.
+    """
+    text = text.strip()
+    words = re.findall(r'\b\w+\b', text)
+    
+    # 1. LENGTH CHECK
+    if len(words) != required_length:
+        return False, f"Need exactly {required_length} words."
+
+    # 2. TARGET WORD CHECK
+    if target_word.lower() not in [w.lower() for w in words]:
+        return False, f"Must include the word '{target_word}'."
+
+    # 3. FORMATTING (The "English Teacher" Rule)
+    # This forces players to construct a real sentence structure.
+    if not text[0].isupper():
+        return False, "Sentence must start with a Capital letter."
+    if text[-1] not in ['.', '!', '?']:
+        return False, "Sentence must end with punctuation ( . ! ? )"
+
+    # 4. REPETITION CHECK (The "Spam" Rule)
+    # Prevents "Honesty honesty honesty honesty"
+    unique_words = set([w.lower() for w in words])
+    # If more than 40% of the sentence is repeated words
+    if len(unique_words) < (len(words) * 0.6):
+        return False, "Too many repeated words. Be creative!"
+
+    # 5. DIVERSITY CHECK
+    # Prevents "A a a a Honesty"
+    # Average word length must be > 2 characters (unless short sentence)
+    avg_len = sum(len(w) for w in words) / len(words)
+    if avg_len < 2.5:
+        return False, "Too much gibberish. Use real words."
+
+    return True, ""
+
 # ===============================
 # PAGE ROUTES
 # ===============================
@@ -88,7 +126,6 @@ def create_game():
     duration = int(data.get("duration", 10))
     game_id = make_id(5)
     
-    # Ensure we have enough words for the game
     game_words = random.sample(WORD_BANK * 5, 100)
     
     GAMES[game_id] = {
@@ -148,7 +185,6 @@ def player_page():
     team_name = session.get("team_name")
     token = session.get("token")
     
-    # CRASH PROOFING: Redirect to index if session/memory is invalid
     if not game_id or not team_name or not token:
         return redirect(url_for("index"))
     
@@ -218,7 +254,6 @@ def api_sync():
                 team["current_scramble_idx"] = -1
                 team["current_scramble"] = None
             
-            # Update Scramble if index changed
             if team["current_scramble_idx"] != current_idx and current_idx < len(game["words"]):
                 raw_word = game["words"][current_idx]
                 team["current_scramble"] = scramble(raw_word)
@@ -251,9 +286,7 @@ def api_action():
     # --- PLAYER 1 GUESS ---
     if action == "guess" and game["state"] == "running":
         guess = data.get("value", "").lower().strip()
-        
-        if team["p1_idx"] >= len(game["words"]):
-             return jsonify({"status": "finished"})
+        if team["p1_idx"] >= len(game["words"]): return jsonify({"status": "finished"})
 
         actual = game["words"][team["p1_idx"]].lower() 
         
@@ -264,20 +297,17 @@ def api_action():
             team["p1_attempts"] = 5
             return jsonify({"status": "correct"})
         
-        # Wrong Guess Logic
         team["p1_attempts"] -= 1
-        
-        # --- SKIP LOGIC (-20 Penalty) ---
         if team["p1_attempts"] <= 0:
-            team["p1_solved_history"].append(game["words"][team["p1_idx"]]) # Add skipped word so P2 can use it
-            team["p1_idx"] += 1      # Skip current word
-            team["p1_attempts"] = 5  # Reset attempts
-            team["score"] = max(0, team["score"] - 20) # Deduct 20 Points (don't go negative)
+            team["p1_solved_history"].append(game["words"][team["p1_idx"]])
+            team["p1_idx"] += 1
+            team["p1_attempts"] = 5
+            team["score"] = max(0, team["score"] - 20)
             return jsonify({"status": "wrong", "msg": "Out of attempts! Skipped & -20 Points."})
 
         return jsonify({"status": "wrong"})
 
-    # --- PLAYER 2 SUBMIT ---
+    # --- PLAYER 2 SUBMIT (IMPROVED) ---
     if action == "submit_sentence" and game["state"] == "running":
         val = data.get("value", "").strip()
         required = team["p2_dice_sum"]
@@ -285,22 +315,19 @@ def api_action():
         if not team["p1_solved_history"]:
              return jsonify({"status": "error", "msg": "Wait for Player 1!"})
 
-        target = team["p1_solved_history"][-1].lower()
+        target = team["p1_solved_history"][-1]
         
-        if not val:
-            return jsonify({"status": "error", "msg": "Type a sentence first!"})
-            
-        words = re.findall(r'\b\w+\b', val)
-        if len(words) != required:
-            return jsonify({"status": "error", "msg": f"Need exactly {required} words"})
-            
-        if target not in [w.lower() for w in words]:
-             return jsonify({"status": "error", "msg": f"Must include '{target}'"})
+        # 1. LOCAL SPAM FILTER (Runs FIRST - Fast & Safe)
+        is_valid, reason = is_valid_sentence(val, target, required)
+        if not is_valid:
+            return jsonify({"status": "error", "msg": reason})
 
+        # 2. DUPLICATE CHECK
         used = [s.lower() for s in team.get("used_sentences", [])]
         if val.lower() in used:
              return jsonify({"status": "error", "msg": "You already used that sentence!"})
 
+        # 3. GRAMMAR API (Runs LAST - Optional Safety)
         try:
             resp = requests.post(
                 "https://api.languagetool.org/v2/check",
@@ -313,16 +340,13 @@ def api_action():
                     if m['rule']['issueType'] in ['grammar', 'misspelling']:
                         return jsonify({"status": "error", "msg": f"Grammar: {m['message']}"})
         except Exception:
-            if not val[0].isupper():
-                return jsonify({"status": "error", "msg": "Start with a Capital letter!"})
-            if val[-1] not in ['.', '!', '?']:
-                return jsonify({"status": "error", "msg": "End with punctuation (. ! ?)"})
+            # If API fails, we trust the local filter we already ran.
+            pass
 
+        # SUCCESS
         team["score"] += required * 5
-        
         if "used_sentences" not in team: team["used_sentences"] = []
         team["used_sentences"].append(val)
-        
         team["p2_dice_sum"] = None 
 
         return jsonify({"status": "correct"})
@@ -332,20 +356,16 @@ def api_action():
 @app.route("/api/leaderboard/<game_id>")
 def api_leaderboard(game_id):
     game = GAMES.get(game_id)
-    # Default response if game not found
     if not game: 
         return jsonify({"leaderboard": [], "time_left": 0, "state": "lobby"})
     
-    # 1. Get Scores
     lb = [{"name": t["name"], "score": t["score"]} for t in game["teams"].values()]
     sorted_lb = sorted(lb, key=lambda x: x["score"], reverse=True)[:10]
     
-    # 2. Get Time
     time_left = 0
     if game["state"] == "running" and game["end_time"]:
         time_left = max(0, int(game["end_time"] - time.time()))
     
-    # 3. Return EVERYTHING in one JSON
     return jsonify({
         "leaderboard": sorted_lb,
         "time_left": time_left,
