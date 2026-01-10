@@ -18,6 +18,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "Keep_This_Static_Key_Safe_For_Eve
 # ===============================
 # CONFIGURATION
 # ===============================
+# 150 Slightly Difficult, Unambiguous Words (5-7 Letters)
 WORD_BANK = [
     # 5-Letter Words
     "Quartz", "Jumbo", "Vigor", "Whisk", "Glyph", "Klutz", "Jerky", "Quack", 
@@ -72,7 +73,7 @@ def cleanup_old_games():
     for gid in expired:
         del GAMES[gid]
 
-# --- NEW: STRICT VALIDATION HELPER ---
+# --- STRICT VALIDATION HELPER ---
 def is_valid_sentence(text, target_word, required_length):
     """
     Returns (True, "") if valid, or (False, "Reason") if invalid.
@@ -90,22 +91,17 @@ def is_valid_sentence(text, target_word, required_length):
         return False, f"Must include the word '{target_word}'."
 
     # 3. FORMATTING (The "English Teacher" Rule)
-    # This forces players to construct a real sentence structure.
     if not text[0].isupper():
         return False, "Sentence must start with a Capital letter."
     if text[-1] not in ['.', '!', '?']:
         return False, "Sentence must end with punctuation ( . ! ? )"
 
     # 4. REPETITION CHECK (The "Spam" Rule)
-    # Prevents "Honesty honesty honesty honesty"
     unique_words = set([w.lower() for w in words])
-    # If more than 40% of the sentence is repeated words
     if len(unique_words) < (len(words) * 0.6):
         return False, "Too many repeated words. Be creative!"
 
     # 5. DIVERSITY CHECK
-    # Prevents "A a a a Honesty"
-    # Average word length must be > 2 characters (unless short sentence)
     avg_len = sum(len(w) for w in words) / len(words)
     if avg_len < 2.5:
         return False, "Too much gibberish. Use real words."
@@ -307,7 +303,7 @@ def api_action():
 
         return jsonify({"status": "wrong"})
 
-    # --- PLAYER 2 SUBMIT (IMPROVED) ---
+    # --- PLAYER 2 SUBMIT ---
     if action == "submit_sentence" and game["state"] == "running":
         val = data.get("value", "").strip()
         required = team["p2_dice_sum"]
@@ -317,7 +313,7 @@ def api_action():
 
         target = team["p1_solved_history"][-1]
         
-        # 1. LOCAL SPAM FILTER (Runs FIRST - Fast & Safe)
+        # 1. LOCAL SPAM FILTER
         is_valid, reason = is_valid_sentence(val, target, required)
         if not is_valid:
             return jsonify({"status": "error", "msg": reason})
@@ -327,7 +323,7 @@ def api_action():
         if val.lower() in used:
              return jsonify({"status": "error", "msg": "You already used that sentence!"})
 
-        # 3. GRAMMAR API (Runs LAST - Optional Safety)
+        # 3. GRAMMAR API (Fallback)
         try:
             resp = requests.post(
                 "https://api.languagetool.org/v2/check",
@@ -340,10 +336,8 @@ def api_action():
                     if m['rule']['issueType'] in ['grammar', 'misspelling']:
                         return jsonify({"status": "error", "msg": f"Grammar: {m['message']}"})
         except Exception:
-            # If API fails, we trust the local filter we already ran.
             pass
 
-        # SUCCESS
         team["score"] += required * 5
         if "used_sentences" not in team: team["used_sentences"] = []
         team["used_sentences"].append(val)
@@ -360,7 +354,8 @@ def api_leaderboard(game_id):
         return jsonify({"leaderboard": [], "time_left": 0, "state": "lobby"})
     
     lb = [{"name": t["name"], "score": t["score"]} for t in game["teams"].values()]
-    sorted_lb = sorted(lb, key=lambda x: x["score"], reverse=True)[:10]
+    # --- CHANGED HERE: Return top 16 instead of 10 ---
+    sorted_lb = sorted(lb, key=lambda x: x["score"], reverse=True)[:16]
     
     time_left = 0
     if game["state"] == "running" and game["end_time"]:
