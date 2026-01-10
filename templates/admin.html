@@ -2,7 +2,7 @@
 
 {% block content %}
 <style>
-    /* Red Dot Animation */
+    /* Red Dot Animation for "Live" status */
     .live-indicator {
         width: 12px;
         height: 12px;
@@ -75,9 +75,7 @@
                     <div>
                         <span class="text-secondary text-uppercase small">Status</span>
                         <div class="d-flex align-items-center mt-1">
-                            {% if game.state == 'running' %}
-                                <div class="live-indicator"></div>
-                            {% endif %}
+                            <div id="liveDot" class="live-indicator {% if game.state != 'running' %}d-none{% endif %}"></div>
                             <h3 class="text-white m-0" id="statusBadge">{{ game.state|upper }}</h3>
                         </div>
                     </div>
@@ -126,11 +124,10 @@
         const copyText = document.getElementById("joinLink");
         copyText.select();
         navigator.clipboard.writeText(copyText.value);
-        alert("Link copied!");
     }
 
     async function startGame() {
-        if(!confirm("Start the round? All players should be ready.")) return;
+        if(!confirm("Start the 10-minute timer?")) return;
         const btn = document.getElementById("startBtn");
         btn.innerText = "Starting...";
         btn.disabled = true;
@@ -145,38 +142,48 @@
             if(data.status === "started") {
                 window.location.reload();
             } else {
-                alert("Error: " + data.error);
+                alert("Error: " + (data.error || "Could not start"));
                 btn.disabled = false;
                 btn.innerText = "Start Round";
             }
         } catch(e) { console.error(e); }
     }
 
-    // POLL DATA
+    // --- SYNC LOOP (Every 2 Seconds) ---
+    // Fetches Time, State, AND Scores in one request
     setInterval(async () => {
         try {
-            const res = await fetch(`/api/sync`, { method: 'POST' });
-            const sync = await res.json();
+            const res = await fetch(`/api/leaderboard/${GAME_ID}`);
+            const data = await res.json();
             
-            // Update Timer
-            const m = Math.floor(sync.time_left / 60);
-            const s = sync.time_left % 60;
+            // 1. Update Timer
+            const m = Math.floor((data.time_left || 0) / 60);
+            const s = (data.time_left || 0) % 60;
             document.getElementById("timer").innerText = `${m}:${s.toString().padStart(2, '0')}`;
             
-            // Check if game finished
-            if(sync.state === "finished") {
-                document.getElementById("statusBadge").innerText = "FINISHED";
-                document.querySelector(".live-indicator")?.remove();
+            // 2. Update Status Visuals
+            const statusBadge = document.getElementById("statusBadge");
+            statusBadge.innerText = (data.state || "LOBBY").toUpperCase();
+            
+            const liveDot = document.getElementById("liveDot");
+            if(data.state === "running") {
+                liveDot.classList.remove("d-none");
+                statusBadge.classList.add("text-white");
+                statusBadge.classList.remove("text-success");
+            } else if (data.state === "finished") {
+                liveDot.classList.add("d-none");
+                statusBadge.innerText = "GAME OVER";
+                statusBadge.classList.remove("text-white");
+                statusBadge.classList.add("text-success");
             }
 
-            // Update Leaderboard
-            const lbRes = await fetch(`/api/leaderboard/${GAME_ID}`);
-            const lbData = await lbRes.json();
-            
+            // 3. Update Leaderboard Table
             const tbody = document.getElementById("lbBody");
-            tbody.innerHTML = lbData.map((t, i) => `
+            const leaders = Array.isArray(data.leaderboard) ? data.leaderboard : [];
+            
+            tbody.innerHTML = leaders.map((t, i) => `
                 <tr>
-                    <td class="ps-4"><span class="badge rounded-pill bg-${i<3?'warning':'secondary'}">${i+1}</span></td>
+                    <td class="ps-4"><span class="badge rounded-pill bg-${i<3?'warning':'secondary'} text-dark">${i+1}</span></td>
                     <td class="fw-bold fs-5">${t.name}</td>
                     <td class="text-end pe-4 text-info font-monospace fs-5">${t.score}</td>
                 </tr>
