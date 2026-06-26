@@ -20,32 +20,24 @@ app.secret_key = os.environ.get("SECRET_KEY", "Keep_This_Static_Key_Safe_For_Eve
 # ===============================
 # 150 Slightly Difficult, Unambiguous Words (5-7 Letters)
 WORD_BANK = [
-    # 5-Letter Words
-    "Quartz", "Jumbo", "Vigor", "Whisk", "Glyph", "Klutz", "Jerky", "Quack", 
-    "Check", "Frock", "Wreck", "Pluck", "Brick", "Chick", "Quick", "Civic", 
-    "Vivid", "Kayak", "Refer", "Madam", "Rotor", "Limit", "Visit", "Habit", 
-    "Panic", "Topic", "Logic", "Magic", "Basic", "Rapid", "Solid", "Valid", 
-    "Rigid", "Humid", "Vapor", "Razor", "Major", "Mayor", "Labor", "Honor", 
-    "Error", "Proof", "Event", "Guest", "Heavy", "Hedge", "Human", "Image", 
-    "Index", "Juice",
+  # 5-Letter Words
+    "Apple", "House", "Water", "Chair", "Table", "Plant", "Train", "Bread", "Smile", "Happy",
+    "Dance", "Music", "River", "Light", "Night", "Money", "Story", "Paper", "Watch", "Earth",
+    "Heart", "World", "Dream", "Start", "Clean", "Sleep", "Clock", "Stand", "Board", "Color",
+    "Party", "Month", "Sound", "Space", "Sport", "Store", "Sugar", "Sweet", "Today", "Track",
+    
     # 6-Letter Words
-    "Jungle", "Puzzle", "Oxygen", "Rhythm", "Galaxy", "Luxury", "Hazard", "Wizard", 
-    "Lizard", "Quorum", "Vacuum", "Jockey", "Hijack", "Injury", "Adjust", "Object", 
-    "Reject", "Inject", "Impact", "Aspect", "Effect", "Defect", "Infect", "Detect", 
-    "Select", "Insect", "Script", "Strict", "Spirit", "Liquid", "Public", "Picnic", 
-    "Exotic", "Tactic", "Static", "Mosaic", "Fabric", "Garlic", "Critic", "Clinic", 
-    "Victim", "System", "Bishop", "Bottle", "Branch", "Bridge", "Bubble", "Bucket", 
-    "Button", "Camera",
+    "Animal", "School", "Window", "Family", "Orange", "Friend", "Mother", "Father", "Sister",
+    "Summer", "Winter", "Spring", "Doctor", "Farmer", "Person", "Garden", "Flower", "Letter",
+    "Number", "Yellow", "Purple", "Market", "Butter", "Cheese", "Pencil", "Forest", "Planet",
+    "Bridge", "Castle", "Cookie", "Coffee", "Dollar", "Energy", "Island", "Monday", "Sunday",
+    
     # 7-Letter Words
-    "Journey", "Mystery", "Chimney", "Volcano", "Diamond", "Uniform", "Whiskey", "Horizon", 
-    "Pumpkin", "Buffalo", "Sparrow", "Rainbow", "Thunder", "Kingdom", "Freedom", "Wisdom", 
-    "Courage", "Justice", "Liberty", "Honesty", "Loyalty", "Gravity", "Quality", "Anxiety", 
-    "Society", "Variety", "Victory", "Century", "Crystal", "Pattern", "Village", "Traffic", 
-    "Baggage", "Luggage", "Cottage", "Message", "Passage", "Address", "Success", "Process", 
-    "Command", "Suggest", "Support", "Connect", "Collect", "Correct", "Account", "Unknown", 
-    "Upgrade", "Version"
+    "Morning", "Teacher", "Student", "Picture", "Country", "Weather", "Library", "Bedroom",
+    "Kitchen", "Clothes", "Science", "History", "Machine", "Station", "Brother", "Blanket",
+    "Airport", "Present", "Evening", "Weekend", "Holiday", "Nothing", "Someone", "Outside",
+    "Bicycle", "Builder", "Capital", "Chicken", "Dolphin", "Emerald", "Glasses", "Welcome"
 ]
-
 GAMES = {}
 
 # ===============================
